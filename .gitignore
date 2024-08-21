@@ -1,0 +1,7 @@
+.venv
+__pycache__
+.DS_Store
+.env
+.python-version
+version_simplificada.sublime-workspace
+version_simplificada.sublime-project
