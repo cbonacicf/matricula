@@ -369,6 +369,8 @@ app = DashProxy(__name__, transforms=[MultiplexerTransform()], external_styleshe
 
 app.config.suppress_callback_exceptions = True
 
+server = app.server
+
 # layout de la aplicación
 app.layout = dbc.Container([
     encabezado,
@@ -449,5 +451,5 @@ def exporta_datos_excel(_, datos):
 
 # ejecución de la aplicación
 if __name__ == '__main__':
-    app.run_server(debug=True, port=8055)
+    app.run_server()
 
