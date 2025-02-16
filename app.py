@@ -446,7 +446,7 @@ def modifica_seleccion(tipo, matricula, genero, nivel, region, area, stem, var_l
 )
 def exporta_datos_excel(_, datos):
     df = exporta_datos(datos)
-    return dcc.send_bytes(df, 'datos_matricula_v2.xlsx')
+    return dcc.send_bytes(df, 'datos_matricula.xlsx')
 
 
 # ejecución de la aplicación
