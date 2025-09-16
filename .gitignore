@@ -5,3 +5,5 @@ __pycache__
 .python-version
 app_matricula.sublime-workspace
 app_matricula.sublime-project
+data/datos_matricula2.parquet
+assets/dashAgGridFunctions.js

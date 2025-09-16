@@ -23,19 +23,20 @@ from dash.exceptions import PreventUpdate
 
 ### Lectura de datos
 
-with open('./data/categorias2.pkl', 'rb') as f:
+with open('./data/categorias.pkl', 'rb') as f:
     categorias = pickle.load(f)
 
 for k, v in categorias.items():
     exec(f'{k} = {v}')
 
-del map_tipo['U. CRUCH']
-del map_tipo_inv[3]
-del map_tipo['U. Privadas']
-del map_tipo_inv[4]
-del map_nivel['Postgrado']
-del map_nivel_inv[2]
+# del map_tipo['U. CRUCH']
+# del map_tipo_inv[3]
+# del map_tipo['U. Privadas']
+# del map_tipo_inv[4]
+del map_nivel['Posgrado']
+# del map_nivel_inv[2]
 
+# matric = pl.scan_parquet('./data/datos_matricula.parquet')
 matric = pl.scan_parquet('./data/datos_matricula.parquet')
 
 ### Colores
@@ -56,8 +57,9 @@ colores = {
     'Primer año': '#c8fb09',
     'Mujeres': '#f8d3ff',
     'Hombres': '#ccecff',
+    'No binarios': '#d0d0d0',
     'Pregrado': '#ccd7f2',
-    'Postgrado': '#a592dd',
+    'Posgrado': '#a592dd',
     'Magister': '#dcbcf0',
     'Doctorado': '#926beb',
     'Postítulo': '#5b97b6',
@@ -94,11 +96,13 @@ colores = {
 
 # ### Funciones
 
+inv = lambda dic: {v: k for k, v in dic.items()}
+
 def base_datos(criterio, variable):
-    mapa = eval(f'map_{variable}_inv')
+    mapa = eval(f'inv(map_{variable})')
     dtype = pl.Enum(list(eval(f'map_{variable}.keys()')))
     return (
-        matric 
+        matric
         .filter(**criterio)
         .collect()
         .pivot(index=variable, on='ano', values='cantidad', aggregate_function='sum')
@@ -232,7 +236,7 @@ boton_radio = dcc.RadioItems(
     style = {'textAlign': 'center'},
     labelStyle = {'display': 'inline-block', 'fontSize': '14px', 'fontWeight': 'normal'},
     inputStyle = {'marginRight': '5px', 'marginLeft': '20px'},
-),    
+),
 
 op_btn_radio2 = crea_opciones({'Líneas': 0, 'Áreas apiladas': 1})
 
@@ -243,7 +247,7 @@ boton_radio2 = dcc.RadioItems(
     style = {'textAlign': 'center'},
     labelStyle = {'display': 'inline-block', 'fontSize': '14px', 'fontWeight': 'normal'},
     inputStyle = {'marginRight': '5px', 'marginLeft': '20px'},
-),    
+),
 
 def nucleo():
     return html.Div(
@@ -302,6 +306,7 @@ def crea_column_defs(variable):
         {'field': '2022', 'width': 100, 'type': 'numericColumn', 'valueFormatter': fmto},
         {'field': '2023', 'width': 100, 'type': 'numericColumn', 'valueFormatter': fmto},
         {'field': '2024', 'width': 100, 'type': 'numericColumn', 'valueFormatter': fmto},
+        {'field': '2025', 'width': 100, 'type': 'numericColumn', 'valueFormatter': fmto},
     ]
 
 # tabla de datos
@@ -319,7 +324,7 @@ def tabla_datos(criterio, variable):
     return dag.AgGrid(
         id='tabla-datos',
         rowData=row_data,
-        defaultColDef={'resizable': True},    
+        defaultColDef={'resizable': True},
         columnDefs=crea_column_defs(variable),
         dashGridOptions = {
             'headerHeight': 40,
@@ -346,7 +351,7 @@ def exporta_datos(datos):
     output = BytesIO()
     (
         pl.DataFrame(datos)
-        .select([pl.col(pl.String)]+[str(i) for i in range(2010, 2025)])
+        .select([pl.col(pl.String)]+[str(i) for i in range(2010, 2026)])
         .write_excel(workbook=output, autofilter=False)
     )
     return output.getvalue()
@@ -451,5 +456,4 @@ def exporta_datos_excel(_, datos):
 
 # ejecución de la aplicación
 if __name__ == '__main__':
-    app.run_server()
-
+    app.run(port=8055)
