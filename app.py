@@ -3,9 +3,11 @@
 
 import polars as pl
 import pickle
-
+from collections import namedtuple
 from io import BytesIO
 import base64
+
+import xlsxwriter
 
 import matplotlib
 matplotlib.use('agg')
@@ -36,10 +38,10 @@ for k, v in categorias.items():
 del map_nivel['Posgrado']
 # del map_nivel_inv[2]
 
-# matric = pl.scan_parquet('./data/datos_matricula.parquet')
-matric = pl.scan_parquet('./data/datos_matricula.parquet')
+map_matricula = {'Matrícula total': 1, 'Matrícula primer año': 2}
 
-### Colores
+matric = pl.scan_parquet('./data/datos_matricula.parquet')
+print### Colores
 
 color_area = [cm.gist_rainbow(x/float(10-1)) for x in range(10)]
 color_area[4] = '#5bb800'
@@ -92,25 +94,102 @@ colores = {
     'Aysén G. C. Ibañez': color_region[14],
     'Magallanes y La Antártica': color_region[15],
 }
+# ### Clase
+
+class Datos:
+    K = [float('inf'), -float('inf')]
+
+    def __init__(self, df):
+        self.df = df
+        self.col = df.columns[0]
+        self.cols = df.columns[1:]
+        self.pct = self.porcentaje()
+        self.var = self.variacion()
+        self.dif = self.diferencia()
+
+    def porcentaje(self):
+        return (
+            self.df
+            .cast({self.col: pl.Utf8})
+            .filter(pl.col(self.col) != 'Total')
+            .with_columns(
+                [(pl.col(c)/pl.col(c).sum()).round(3) for c in self.cols]
+            )
+        )
+
+    def variacion(self):
+        return (
+            self.df
+            .with_columns(
+                [(pl.col(act)/pl.col(ant)-1).round(3).replace(Datos.K, None) for act, ant in zip(self.cols[1:], self.cols[:-1])]
+            )
+            .drop(self.cols[0])
+        )
+
+    def var_acc(self, ano=2020):
+        return (
+            self.df
+            .with_columns(
+                [(pl.col(c)/pl.col(str(ano))-1).round(3).replace(Datos.K, None) for c in self.cols]
+            )
+        )
+
+    def diferencia(self):
+        return (
+            self.df
+            .with_columns(
+                [(pl.col(act)-pl.col(ant)) for act, ant in zip(self.cols[1:], self.cols[:-1])]
+            )
+            .drop(self.cols[0])
+        )
+
+    def dif_acc(self, ano=2020):
+        return (
+            self.df
+            .with_columns(
+                [(pl.col(c)-pl.col(str(ano))) for c in self.cols]
+            )
+        )
 
 
 # ### Funciones
 
 inv = lambda dic: {v: k for k, v in dic.items()}
 
+def total(base):
+    variable = base.columns[0]
+    return pl.DataFrame({variable: 'Total'}).join(base.select(pl.exclude(variable)).sum(), how='cross')
+
+# def base_datos(criterio, variable):
+#     mapa = eval(f'inv(map_{variable})')
+#     tipo = pl.Enum(list(eval(f'map_{variable}.keys()')))
+#     return (
+#         matric
+#         .filter(**criterio)
+#         .collect()
+#         .pivot(index=variable, on='ano', values='cantidad', aggregate_function='sum')
+#         .with_columns(
+#             pl.col(variable).replace_strict(mapa, return_dtype=tipo)
+#         )
+#         .sort(variable)
+#     )
+
 def base_datos(criterio, variable):
-    mapa = eval(f'inv(map_{variable})')
-    dtype = pl.Enum(list(eval(f'map_{variable}.keys()')))
-    return (
+    mapa = inv(eval(f'map_{variable}'))
+    tipo = pl.Enum(list(mapa.values()) + ['Total'])
+    df = (
         matric
         .filter(**criterio)
         .collect()
         .pivot(index=variable, on='ano', values='cantidad', aggregate_function='sum')
         .with_columns(
-            pl.col(variable).replace_strict(mapa, return_dtype=dtype)
+            pl.col(variable).replace_strict(mapa, return_dtype=pl.Utf8).alias(variable)
         )
-        .sort(variable)
     )
+    if len(df) > 1:
+        return df.cast({variable: tipo}).sort(variable), pl.concat([df, total(df)]).cast({variable: tipo}).sort(variable)
+    else:
+        return df, df
 
 def base_grafico(base):
     variable = base.columns[0]
@@ -124,9 +203,9 @@ def base_grafico(base):
 
 criterio = dict(matricula=1, nivel=1)   # default: matricula total, pregrado
 
-def ser_schema(criterio, variable):
-    esquema = base_datos(criterio, variable).cast({variable: pl.Utf8}).schema
-    return {k: 'pl.'+str(v) for k, v in dict(esquema).items()}
+# def ser_schema(criterio, variable):
+#     esquema = base_datos(criterio, variable).cast({variable: pl.Utf8}).schema
+#     return {k: 'pl.'+str(v) for k, v in dict(esquema).items()}
 
 ### Gráficos
 
@@ -249,6 +328,19 @@ boton_radio2 = dcc.RadioItems(
     inputStyle = {'marginRight': '5px', 'marginLeft': '20px'},
 ),
 
+op_btn_radio_ano = crea_opciones({str(k): k for k in list(range(2010, 2026))})
+
+boton_radio_anos = html.Div([
+    html.P("Seleccione el año de referencia:", style={'margin-left': '20px', 'margin-bottom': '0'}),
+    dcc.RadioItems(
+        id='btn-radio-ano',
+        options = op_btn_radio_ano,
+        inline=True,
+        labelStyle = {'display': 'inline-block', 'fontSize': '14px', 'fontWeight': 'normal'},
+        inputStyle = {'marginRight': '4px', 'marginLeft': '16px'},
+    )
+], id='div-btn-radio-ano', style={'display': 'flex', 'align-items': 'center', 'marginBottom': '15px'}, hidden=True)
+
 def nucleo():
     return html.Div(
         dbc.Row([
@@ -271,9 +363,19 @@ def nucleo():
 
 #### Tabla
 
+locale_es_CL = """d3.formatLocale({
+  "decimal": ",",
+  "thousands": ".",
+  "grouping": [3],
+  "currency": ["$", ""]
+})"""
+
 encabezado_tabla = dbc.Col([
     dbc.Row(html.H3('Tabla', style={'textAlign': 'center', 'marginTop': -10, 'marginBottom': 20}))
 ], width=9)
+
+orden = ['tipo', 'matricula', 'genero', 'nivel', 'region', 'area', 'stem'] + [str(x) for x in range(2010, 2026)]
+Crt = namedtuple('Crt', ['tipo', 'matricula', 'genero', 'nivel', 'region', 'area', 'stem'])
 
 variables = [tupla[1] for tupla in tuplas]
 map_nombres = dict((tupla[1], tupla[0]) for tupla in tuplas)
@@ -287,27 +389,31 @@ def crea_criterio(tipo, matricula, genero, nivel, region, area, stem):
     return dic_retorna
 
 # fmto = {'function': "d3.format('(,.0f')(params.value)"}
-fmto = {"function": "d3.format(',.0f')(params.value).replace(/,/g, '.')"}
+# fmto = {"function": "d3.format(',.0f')(params.value).replace(/,/g, '.')"}
+fmto = {"function": f"{locale_es_CL}.format(',.0f')(params.value)"}
+
+lista_fmto = [',.0f', ',.1%']
+fn_fmto = lambda n: {"function": f"{locale_es_CL}.format('{lista_fmto[n]}')(params.value)"}
 
 def crea_column_defs(variable):
     return [
         {'field': variable, 'headerName': map_nombres[variable], 'width': 250, 'type': 'leftAligned', 'pinned': 'left'},
-        {'field': '2010', 'width': 100, 'type': 'numericColumn', 'valueFormatter': fmto},
-        {'field': '2011', 'width': 100, 'type': 'numericColumn', 'valueFormatter': fmto},
-        {'field': '2012', 'width': 100, 'type': 'numericColumn', 'valueFormatter': fmto},
-        {'field': '2013', 'width': 100, 'type': 'numericColumn', 'valueFormatter': fmto},
-        {'field': '2014', 'width': 100, 'type': 'numericColumn', 'valueFormatter': fmto},
-        {'field': '2015', 'width': 100, 'type': 'numericColumn', 'valueFormatter': fmto},
-        {'field': '2016', 'width': 100, 'type': 'numericColumn', 'valueFormatter': fmto},
-        {'field': '2017', 'width': 100, 'type': 'numericColumn', 'valueFormatter': fmto},
-        {'field': '2018', 'width': 100, 'type': 'numericColumn', 'valueFormatter': fmto},
-        {'field': '2019', 'width': 100, 'type': 'numericColumn', 'valueFormatter': fmto},
-        {'field': '2020', 'width': 100, 'type': 'numericColumn', 'valueFormatter': fmto},
-        {'field': '2021', 'width': 100, 'type': 'numericColumn', 'valueFormatter': fmto},
-        {'field': '2022', 'width': 100, 'type': 'numericColumn', 'valueFormatter': fmto},
-        {'field': '2023', 'width': 100, 'type': 'numericColumn', 'valueFormatter': fmto},
-        {'field': '2024', 'width': 100, 'type': 'numericColumn', 'valueFormatter': fmto},
-        {'field': '2025', 'width': 100, 'type': 'numericColumn', 'valueFormatter': fmto},
+        {'field': '2010', 'width': 100, 'type': 'numericColumn', 'valueFormatter': fn_fmto(0)},
+        {'field': '2011', 'width': 100, 'type': 'numericColumn', 'valueFormatter': fn_fmto(0)},
+        {'field': '2012', 'width': 100, 'type': 'numericColumn', 'valueFormatter': fn_fmto(0)},
+        {'field': '2013', 'width': 100, 'type': 'numericColumn', 'valueFormatter': fn_fmto(0)},
+        {'field': '2014', 'width': 100, 'type': 'numericColumn', 'valueFormatter': fn_fmto(0)},
+        {'field': '2015', 'width': 100, 'type': 'numericColumn', 'valueFormatter': fn_fmto(0)},
+        {'field': '2016', 'width': 100, 'type': 'numericColumn', 'valueFormatter': fn_fmto(0)},
+        {'field': '2017', 'width': 100, 'type': 'numericColumn', 'valueFormatter': fn_fmto(0)},
+        {'field': '2018', 'width': 100, 'type': 'numericColumn', 'valueFormatter': fn_fmto(0)},
+        {'field': '2019', 'width': 100, 'type': 'numericColumn', 'valueFormatter': fn_fmto(0)},
+        {'field': '2020', 'width': 100, 'type': 'numericColumn', 'valueFormatter': fn_fmto(0)},
+        {'field': '2021', 'width': 100, 'type': 'numericColumn', 'valueFormatter': fn_fmto(0)},
+        {'field': '2022', 'width': 100, 'type': 'numericColumn', 'valueFormatter': fn_fmto(0)},
+        {'field': '2023', 'width': 100, 'type': 'numericColumn', 'valueFormatter': fn_fmto(0)},
+        {'field': '2024', 'width': 100, 'type': 'numericColumn', 'valueFormatter': fn_fmto(0)},
+        {'field': '2025', 'width': 100, 'type': 'numericColumn', 'valueFormatter': fn_fmto(0)},
     ]
 
 # tabla de datos
@@ -320,13 +426,59 @@ getRowStyle = {
 }
 
 def tabla_datos(criterio, variable):
-    row_data = base_datos(criterio, variable).to_dicts()
+    row_data = base_datos(criterio, variable)[1].to_dicts()
 
     return dag.AgGrid(
         id='tabla-datos',
         rowData=row_data,
         defaultColDef={'resizable': True},
         columnDefs=crea_column_defs(variable),
+        dashGridOptions = {
+            'headerHeight': 40,
+            'rowHeight': 35,
+            'domLayout': 'autoHeight',
+            'rowSelection': 'single',
+        },
+        getRowStyle=getRowStyle,
+        style={'width': 1296}
+    )
+
+encabezado_tabla2 = dbc.Col([
+    dbc.Row([
+        html.H3('Transformación de datos:', style={'textAlign': 'left', 'marginLeft': 20, 'marginTop': -10, 'marginBottom': 0}),
+    ]),
+], width=3)
+
+selector_tabla = dbc.Col(
+    dcc.Dropdown(id='drop-trans',
+       options=[
+           {'label': 'Distribución porcentual anual', 'value': 1},
+           {'label': 'Variación con respecto al año anterior', 'value': 2},
+           {'label': 'Variación con respecto a un año determinado', 'value': 3},
+           {'label': 'Diferencia con respecto al año anterior', 'value': 4},
+           {'label': 'Diferencia con respecto a un año determinado', 'value': 5},
+       ],
+       value=1,
+       clearable=False,
+    ),
+    width=4,
+    style={'marginLeft': 20, 'marginBottom': 15}
+)
+
+def crea_column_defs2(variable, n, cols):
+    return [
+        {'field': variable, 'headerName': map_nombres[variable], 'width': 250, 'type': 'leftAligned', 'pinned': 'left'}
+    ] + [{'field': f'{i}', 'width': 100, 'type': 'numericColumn', 'valueFormatter': fn_fmto(n)} for i in cols]
+
+def tabla_datos2(criterio, variable):
+    row_data = base_datos(criterio, variable)[1]
+    dt = Datos(row_data)
+
+    return dag.AgGrid(
+        id='tabla-datos2',
+        rowData=dt.pct.to_dicts(),
+        defaultColDef={'resizable': True},
+        columnDefs=crea_column_defs2(variable, 1, dt.cols),
         dashGridOptions = {
             'headerHeight': 40,
             'rowHeight': 35,
@@ -358,6 +510,57 @@ def exporta_datos(datos):
     return output.getvalue()
 
 
+import polars.selectors as cs
+
+custom_formats = {
+    cs.integer(): "#,##0;-#,##0",
+    cs.float(): "#,##0.0%;-#,##0.0%",
+}
+
+
+def exporta_datos2(datos, trans, param):
+    output = BytesIO()
+
+    df = (
+        pl.DataFrame(datos)
+        .select([pl.col(pl.String)]+[str(i) for i in range(2010, 2026)])
+    )
+
+    dt = Datos(df)
+    pos = (2, 0)
+
+    match trans:
+        case 1:
+            tabla = dt.pct
+        case 2:
+            tabla = dt.var
+        case 3:
+            tabla = dt.var_acc(param['3'])
+        case 4:
+            tabla = dt.dif
+        case 5:
+            tabla = dt.dif_acc(param['5'])
+
+    with xlsxwriter.Workbook(output) as workbook:
+        titulo = workbook.add_format({'font_size': 16})
+
+        worksheet = workbook.add_worksheet('Datos')
+        worksheet.set_column(1, 16, 10)
+        worksheet.write(0, 0, 'Datos de Matrícula', titulo)
+        df.write_excel(workbook=workbook, worksheet='Datos', position=pos, autofilter=False)
+
+        tabla.write_excel(
+            workbook=workbook,
+            worksheet='Datos',
+            position=(pos[0]+len(df)+2, pos[1]),
+            column_formats=custom_formats,
+            autofilter=False,
+            autofit=True,
+        )
+
+    return output.getvalue()
+
+
 footer = html.Div(
     html.Footer(
         style={
@@ -385,10 +588,16 @@ app.layout = dbc.Container([
     html.Hr(),
     encabezado_tabla,
     tabla_datos(criterio, 'tipo'),
+    html.Hr(),
+    encabezado_tabla2,
+    selector_tabla,
+    boton_radio_anos,
+    tabla_datos2(criterio, 'tipo'),
     btn_exp_datos,
     footer,
 
-    dcc.Store(id='datos-exporta', data=base_datos(criterio, 'tipo').to_dicts()),
+    dcc.Store(id='datos-exporta', data=base_datos(criterio, 'tipo')[1].to_dicts()),
+    dcc.Store(id='param', data={'3': 2020, '5': 2020}),
 ])
 
 # callbacks
@@ -407,6 +616,12 @@ app.layout = dbc.Container([
     Output('boton-radio2', 'value'),
     Output('datos-exporta', 'data'),
 
+    Output('tabla-datos2', 'rowData'),
+    Output('tabla-datos2', 'columnDefs'),
+    Output('param', 'data'),
+    Output('drop-trans', 'value'),
+    Output('div-btn-radio-ano', 'hidden'),
+
     Input('restablece', 'n_clicks'),
     prevent_initial_call=True,
 )
@@ -416,9 +631,11 @@ def restablece_seleccion(click):
     else:
         defecto = [0, 1, 0, 1, 0, 0, 0]
         crt_local = crea_criterio(*defecto)
-        base_local = base_datos(crt_local, 'tipo').to_dicts()
-        return base_local, crea_column_defs('tipo'), *defecto, 'tipo', 0, base_local
-
+        base_local = base_datos(crt_local, 'tipo')[1]
+        dt = Datos(base_local)
+        # return base_local, crea_column_defs('tipo'), *defecto, 'tipo', 0, base_local
+        return base_local.to_dicts(), crea_column_defs('tipo'), *defecto, 'tipo', 0, base_local.to_dicts(), dt.pct.to_dicts(), crea_column_defs2(dt.col, 1, dt.cols), \
+            {'3': 2020, '5': 2020}, 1, True
 
 # modifica selección
 @app.callback(
@@ -426,6 +643,9 @@ def restablece_seleccion(click):
     Output('tabla-datos', 'columnDefs'),
     Output(component_id='imagen-grafico', component_property='src'),
     Output('datos-exporta', 'data'),
+
+    Output('tabla-datos2', 'rowData'),
+    Output('tabla-datos2', 'columnDefs'),
 
     Input('drop-tipo', 'value'),
     Input('drop-matricula', 'value'),
@@ -436,25 +656,113 @@ def restablece_seleccion(click):
     Input('drop-stem', 'value'),
     Input('boton-radio', 'value'),
     Input('boton-radio2', 'value'),
+
+    State('drop-trans', 'value'),
+    State('param', 'data'),
 )
-def modifica_seleccion(tipo, matricula, genero, nivel, region, area, stem, var_local, tipo_graf):
-    crt_local = crea_criterio(tipo, matricula, genero, nivel, region, area, stem)
-    base_local = base_datos(crt_local, var_local)
-    return base_local.to_dicts(), crea_column_defs(var_local), crea_figura(base_grafico(base_local), tipo_graf), base_local.to_dicts()
+def modifica_seleccion(tipo, matricula, genero, nivel, region, area, stem, var_local, tipo_graf, trans, param):
+    crt = crea_criterio(tipo, matricula, genero, nivel, region, area, stem)
+    df, dft = base_datos(crt, var_local)
+    dt = Datos(dft)
+    match trans:
+        case 1:
+            tabla, columnas = dt.pct.to_dicts(), crea_column_defs2(dt.col, 1, dt.cols)
+        case 2:
+            tabla, columnas = dt.var.to_dicts(), crea_column_defs2(dt.col, 1, dt.cols[1:])
+        case 3:
+            tabla, columnas = dt.var_acc(param['3']).to_dicts(), crea_column_defs2(dt.col, 1, dt.cols)
+        case 4:
+            tabla, columnas = dt.dif.to_dicts(), crea_column_defs2(dt.col, 0, dt.cols[1:])
+        case 5:
+            tabla, columnas = dt.dif_acc(param['5']).to_dicts(), crea_column_defs2(dt.col, 0, dt.cols)
+    return dft.to_dicts(), crea_column_defs(var_local), crea_figura(base_grafico(df), tipo_graf), dft.to_dicts(), tabla, columnas
+
+# modifica selección de transformación
+@app.callback(
+    Output('tabla-datos2', 'rowData'),
+    Output('tabla-datos2', 'columnDefs'),
+    Input('drop-trans', 'value'),
+    State('datos-exporta', 'data'),
+    State('param', 'data'),
+    prevent_initial_call=True,
+)
+def cambia_tabla_transformacion(trans, data, param):
+    df = pl.DataFrame(data)
+    df = df.select([col for col in orden if col in df.columns])
+    dt = Datos(df)
+    match trans:
+        case 1:
+            tabla, columnas = dt.pct.to_dicts(), crea_column_defs2(dt.col, 1, dt.cols)
+        case 2:
+            tabla, columnas = dt.var.to_dicts(), crea_column_defs2(dt.col, 1, dt.cols[1:])
+        case 3:
+            tabla, columnas = dt.var_acc(param['3']).to_dicts(), crea_column_defs2(dt.col, 1, dt.cols)
+        case 4:
+            tabla, columnas = dt.dif.to_dicts(), crea_column_defs2(dt.col, 0, dt.cols[1:])
+        case 5:
+            tabla, columnas = dt.dif_acc(param['5']).to_dicts(), crea_column_defs2(dt.col, 0, dt.cols)
+    return tabla, columnas
+
+# selecciona transformación
+@app.callback(
+    Output('div-btn-radio-ano', 'hidden'),
+    Output('btn-radio-ano', 'value'),
+    Input('drop-trans', 'value'),
+    State('param', 'data'),
+    prevent_initial_call=True,
+)
+def selecciona_transformacion(trans, param):
+    dic = {1: True, 2: True, 3: False, 4: True, 5: False}
+    return dic[trans], param.get(str(trans), dash.no_update)
+
+# selecciona año de referencia
+@app.callback(
+    Output('tabla-datos2', 'rowData'),
+    Output('tabla-datos2', 'columnDefs'),
+    Output('param', 'data'),
+    Input('btn-radio-ano', 'value'),
+    State('drop-trans', 'value'),
+    State('datos-exporta', 'data'),
+    State('param', 'data'),
+    prevent_initial_call=True,
+)
+def slecciona_ano(ano, trans, data, param):
+    df = pl.DataFrame(data)
+    df = df.select([col for col in orden if col in df.columns])
+    dt = Datos(df)
+    param[str(trans)] = ano
+    match trans:
+        case 3:
+            tabla, columnas = dt.var_acc(param['3']).to_dicts(), crea_column_defs2(dt.col, 1, dt.cols)
+        case 5:
+            tabla, columnas = dt.dif_acc(param['5']).to_dicts(), crea_column_defs2(dt.col, 0, dt.cols)
+    return tabla, columnas, param
 
 
 # exporta datos a excel
+# @app.callback(
+#     Output('exporta-datos-archivo', 'data'),
+#     Input('exporta-datos', 'n_clicks'),
+#     State('datos-exporta', 'data'),
+#     prevent_initial_call=True,
+# )
+# def exporta_datos_excel(_, datos):
+#     df = exporta_datos(datos)
+#     return dcc.send_bytes(df, 'datos_matricula.xlsx')
+
 @app.callback(
     Output('exporta-datos-archivo', 'data'),
     Input('exporta-datos', 'n_clicks'),
     State('datos-exporta', 'data'),
+    State('drop-trans', 'value'),
+    State('param', 'data'),
     prevent_initial_call=True,
 )
-def exporta_datos_excel(_, datos):
-    df = exporta_datos(datos)
+def exporta_datos_excel(_, datos, trans, param):
+    df = exporta_datos2(datos, trans, param)
     return dcc.send_bytes(df, 'datos_matricula.xlsx')
 
 
 # ejecución de la aplicación
 if __name__ == '__main__':
-    app.run()
+    app.run() # debug=True, port=8055) # prueba local
