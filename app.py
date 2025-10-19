@@ -94,6 +94,7 @@ colores = {
     'Aysén G. C. Ibañez': color_region[14],
     'Magallanes y La Antártica': color_region[15],
 }
+
 # ### Clase
 
 class Datos:
