@@ -41,7 +41,8 @@ del map_nivel['Posgrado']
 map_matricula = {'Matrícula total': 1, 'Matrícula primer año': 2}
 
 matric = pl.scan_parquet('./data/datos_matricula.parquet')
-print### Colores
+
+### Colores
 
 color_area = [cm.gist_rainbow(x/float(10-1)) for x in range(10)]
 color_area[4] = '#5bb800'
@@ -329,7 +330,8 @@ boton_radio2 = dcc.RadioItems(
     inputStyle = {'marginRight': '5px', 'marginLeft': '20px'},
 ),
 
-op_btn_radio_ano = crea_opciones({str(k): k for k in list(range(2010, 2026))})
+#op_btn_radio_ano = crea_opciones({str(k): k for k in list(range(2010, 2026))})
+op_btn_radio_ano = crea_opciones({str(k): k for k in list(range(2010, 2027))})
 
 boton_radio_anos = html.Div([
     html.P("Seleccione el año de referencia:", style={'margin-left': '20px', 'margin-bottom': '0'}),
@@ -375,7 +377,8 @@ encabezado_tabla = dbc.Col([
     dbc.Row(html.H3('Tabla', style={'textAlign': 'center', 'marginTop': -10, 'marginBottom': 20}))
 ], width=9)
 
-orden = ['tipo', 'matricula', 'genero', 'nivel', 'region', 'area', 'stem'] + [str(x) for x in range(2010, 2026)]
+#orden = ['tipo', 'matricula', 'genero', 'nivel', 'region', 'area', 'stem'] + [str(x) for x in range(2010, 2026)]
+orden = ['tipo', 'matricula', 'genero', 'nivel', 'region', 'area', 'stem'] + [str(x) for x in range(2010, 2027)]
 Crt = namedtuple('Crt', ['tipo', 'matricula', 'genero', 'nivel', 'region', 'area', 'stem'])
 
 variables = [tupla[1] for tupla in tuplas]
@@ -415,6 +418,7 @@ def crea_column_defs(variable):
         {'field': '2023', 'width': 100, 'type': 'numericColumn', 'valueFormatter': fn_fmto(0)},
         {'field': '2024', 'width': 100, 'type': 'numericColumn', 'valueFormatter': fn_fmto(0)},
         {'field': '2025', 'width': 100, 'type': 'numericColumn', 'valueFormatter': fn_fmto(0)},
+        {'field': '2026', 'width': 100, 'type': 'numericColumn', 'valueFormatter': fn_fmto(0)},
     ]
 
 # tabla de datos
@@ -505,7 +509,8 @@ def exporta_datos(datos):
     output = BytesIO()
     (
         pl.DataFrame(datos)
-        .select([pl.col(pl.String)]+[str(i) for i in range(2010, 2026)])
+#        .select([pl.col(pl.String)]+[str(i) for i in range(2010, 2026)])
+        .select([pl.col(pl.String)]+[str(i) for i in range(2010, 2027)])
         .write_excel(workbook=output, autofilter=False)
     )
     return output.getvalue()
@@ -524,7 +529,8 @@ def exporta_datos2(datos, trans, param):
 
     df = (
         pl.DataFrame(datos)
-        .select([pl.col(pl.String)]+[str(i) for i in range(2010, 2026)])
+#        .select([pl.col(pl.String)]+[str(i) for i in range(2010, 2026)])
+        .select([pl.col(pl.String)]+[str(i) for i in range(2010, 2027)])
     )
 
     dt = Datos(df)
