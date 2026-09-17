@@ -38,7 +38,7 @@ for k, v in categorias.items():
 del map_nivel['Posgrado']
 # del map_nivel_inv[2]
 
-# map_matricula = {'Matrícula total': 1, 'Matrícula primer año': 2}
+map_matricula = {'Matrícula total': 1, 'Matrícula primer año': 2}
 
 matric = pl.scan_parquet('./data/datos_matricula.parquet')
 
