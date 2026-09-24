@@ -3,8 +3,8 @@ __pycache__
 .DS_Store
 .env
 .python-version
-app_matricula.sublime-workspace
-app_matricula.sublime-project
+.ropeproject
 data/datos_matricula2.parquet
+data/datos_matricula.parquet
 data/datos_matricula_bak.parquet
 assets/dashAgGridFunctions.js
